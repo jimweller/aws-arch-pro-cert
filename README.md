@@ -1,0 +1,567 @@
+# AWS Architect Professional Notes
+
+- TODO
+  - CloudFront origin types
+  - Budget alert action types (can't do terminiation, probably only notification?)
+  - IPv6 gotchas, IGW vs NGW
+    - NGW don't support ipv6
+    - vpc, subnet, and ec2 all need ipv6, private subnets use igw egress only (basically a NGW), public subnets use regular IGW
+  - ec2 placement options, cluster/partition? cluster is same box, partition in same az
+  - Elastic Fabric Adapter EFA? basically fiber for EMR
+  - Why do I need ipsec VPN on transit gateway to get BGP?
+    - transit gateway is not a load balancer
+  - It is a best practice to move the database connection outside the event handler so subsequent invocations of the Lambda function can reuse it.
+  - S3 different types of public access IgnorePublicAcls, BlockPublicAcls, BlockPublicPolicy, RestrictPublicBuckets
+
+- Compute
+  - EC2
+    - inspector
+      - CVE assessments, scans for vulnerabilities
+      - Network accessibility, like check for open ports that don't comply
+    - spot instances can become unavailable if the price exceeds the bid
+    - There is no promiscuous mode, use traffic mirroring to another instance
+    - auto scaling
+      - launch configuration, can't modify, only create new and assign
+    - not possible to move an existing instance to another subnet, Availability Zone, or VPC. Create ami from existing instance, launch new instance from AMI in new subnet
+  - ECS
+  - EKS
+  - Computer Optimizer
+    - recommendations on capacity and right sizing
+    - enhanced is longer than standard's 14 days
+  - Elastic Beanstalk
+    - decouple database if you don't want to lose it
+    - blue/green to swap things out
+  - Lambda
+    - Java, Go, PowerShell, Node. js, C#, Python, and Ruby
+    - to use docker, install runtime interface client
+- Database
+  - RDS
+    - mysql, mssql, oracle, maria, postgres
+    - huge number of connections, like 100,000
+    - encrypted->unencrypted requires export/import
+    - I/O credits are per gb, 3 iops per GB for GP. So 100GB disk is 300 IOPS
+    - use read replicas for reporting to avoid impacting production workloads
+    - changing instance types is a reboot
+  - Aurora
+    - serverless mysql or postgres
+    - cloning is faster than snapshot
+    - can share w/ RAM, resource access manager
+    - auto backs up and retains until next backup. snapshots for longer retention but extra cost.
+  - Dynamo
+    - nosql
+    - only solution that allows writes in multiple regions
+    - read/write RCU/WCU can be provisioned or use pay per use on-demand auto scaling
+    - faster throughput than RDS
+    - max item size 400k
+    - read/write/store costs, so purge when you can and minimize r/w
+    - deleting a whole table is more efficient and less costly than deleting records, so drop and recreate
+  - DocumentDB
+    - nosql
+    - mongo compatibility mode
+    - more hands on, less serverless
+- Network
+  - Route 53 DNS
+    - create authorization for vpc on hosted zone, associate vpc w/ hosted zone, delete authorization
+    - five API requests per second per AWS account
+    - 10,000 dns queries per second per ENI
+    - healthcheck
+      - HTTP status within 2 seconds
+      - String in first 5kb
+      - HTTPS must support TLS on endpoint
+      - Health check does NOT validate certs, won't fail for bad/expired cert
+    - If you're creating failover records in a private hosted zone, you must assign a public IP address to an instance in the VPC to check the health of an endpoint within a VPC by IP address
+    - Records without a health check are always considered healthy. If no record is healthy, all records are deemed to be healthy
+    - Each health check that you create can monitor one of the following: The health of a specified resource, such as a web server. The status of other health checks. The status of an Amazon CloudWatch alarm.
+  - Global accelerator
+    - 2 instances of same IP
+    - up to 10 regions
+    - anycast
+    - can only use VPC subnet endpoints, NLB as of August '23
+  - VPC
+    - Three privates 10/8, 172.16/12, 192.168/16
+    - min size /28 and max /16 (65k addr)
+    - subnet trick question /29, subnets are only /16-/28
+    - subnet trick question same subnet cannot have routes to vpc with identical subnets. if need to route to diff vpcs w/ same subnet, origin VPC needs diff subnets to have diff route tables.
+    - first 4 and last one reserved
+    - IGW
+      - outbound NAT
+    - NAT gw
+      - outbound NAT, but no inbound internet
+      - single AZ (need multiple for HA)
+    - NACL
+      - allow/deny
+      - stateless
+      - subnet level
+    - Security group
+      - instance only
+      - allow only
+      - stateful (allows reverse flow)
+      - can refernce security groups in the same region.
+    - flow logs
+      - logs traffic
+      - defined at vpc, subnet or eni
+      - send to CW of S3
+      - can be filtered
+    - bastion hosts
+      - RDP/SSH
+      - SSM is better
+    - vpc peering
+      - not transitive
+      - longest prefex (most specific) first routing
+      - NO, overlapping ciders (even if one of many), transitive, edge-to-edge (which is really transitive)
+    - vpc endpoint
+      - endpoint gateway only for s3 and dynamodb
+        - not transitive (can't use dx/vpn to access s3)
+        - used for VPC's w/ no IGW or NGW
+        - only used in a VPC (not for on prem or another VPC)
+        - uses AWS *PUBLIC* ip addresses
+        - gateways are free
+      - everything else endpoint interface (which requires an ENI in the vpc subnet)
+        - transitive (can be shrared dx/vpn)
+        - exposes AWS services to a private subnet
+        - also used for on-prem and other vpcs (outside current VPC scenarios)
+        - interface endpoints extend gateway endpoints by using private IP addresses to route requests to Amazon S3 from within your VPC, on-prem, or VPC in other region (w/ peering or transit GW)
+        - interface enpoints cost
+      - policies
+        - says what principals can access what services
+        - still need resource and iam policies
+  - PrivateLink
+    - VPC endpoint services
+    - exposes services to other VPCs (aws services, not IP/TCP)
+  - Site-to-site vpn
+    - ipsec
+    - does two tunnels for redundancy
+    - can use global accelerator
+    - must use public vif over DX
+    - routing
+      - static
+      - BGP dynamic
+        - eBGP for over internet
+        - ASN is a secret on each side
+      - client gw -> server gateway (cgw->vgw)
+    - VPN cloud hub
+      - connect up to 10 client gateways
+      - they talk to each other over the hub
+      - low cost, good for backup for like inter datacenter connections
+  - ClientVPN
+  - DirectConnect
+    - DirectConnect *gateway* can be associated with:
+      - Note: globally available resource that can be accessed from all regions
+      - transit gateway (vpcs in same reason) 
+      - virtual private gateway
+    - private vif
+    - no redundant
+    - public vif to hit normal aws resources as if over internet
+    - private vif to reach into VPC
+    - transit vif to connect to transit gateway
+    - dedicated connection, your own wire
+    - hosted connection, virtual wire, scalable on demand
+    - link aggregation groups (lag), pairing multiple DX, up to 4
+    - direct connect gateway, terminates DX to send to VIFs in multiple vpcs or to a transit GW
+    - SiteLink, route DX through AWS DX GW, bypasses regions, just network (ala tik tok architecture)
+  - VPC flow logs
+    - to s3, cloudwatch, or kinesis firehose
+  - AWS network firewall
+    - vpc level firewall
+    - can be managed by firewall manager
+  - WAF
+    - use to block countries
+    - log dests cloudwatch, s3, kinesis data firehose
+  - ALB
+    - WebACL goes here (like from WAF), not on cloudfront
+    - HTTP/HTTPS only, no other protocols (no ssh, etc.) or transports (no udp)
+    - The rule *.example.com matches test.example.com but doesn't match example.com. Hence, we also need to include ecomm.com along with *.ecomm.com 
+    - Can't have static ip addresses, have to put behind NLB
+  - NLB
+    - no NAT, straight pass through
+    - layer 4, tcp/udp
+    - supports tls
+  - ELB
+    - connection draining, ELB stops sending requests to instances that are de-registering or unhealthy while keeping the existing connections open
+  - Transit Gateway
+  - Endpoints
+  - API gateway
+    - HTTP or REST, HTTP is lower cost than REST
+    - REST type can integrate directly with DynamoDB w/ no middle compute, HTTP **cannot**
+    - Can do caching of api requests (like to reduce load on compute), can't be cached by cloudfront
+  - Appsync
+    - graphql
+  - CloudFront
+    - Can set custom headers for waf/alb/origin
+    - Origin types? TODO
+    - Comes w/ AWS shield standard (DDoS)
+    - can't cache api gw results
+    - **managed** prefix lists are predefined sets by aws, don't have to build IP lists manually
+    - Invalid certificate or chain, CloudFront drops the TCP connection, returns HTTP status code 502 (Bad Gateway), and sets the X-Cache header to Error 
+    - Lambda@edge
+      - After CloudFront receives a request from a viewer (viewer request)
+      - Before CloudFront forwards the request to the origin (origin request)
+      - After CloudFront receives the response from the origin (origin response)
+      - Before CloudFront forwards the response to the viewer (viewer response)
+      - Required to change things, can't change things with just cloudfront alone
+- Storage
+  - types
+    - block: ebs, ec2 instance
+      - iops is a function of disk size, bigger disk, more iops, more throughput, 3 iops/gb
+    - file: efs, fsx
+    - object: s3, glacier
+  - s3
+    - 100 buckets per account, need to split on folder for bigger uses
+    - object
+    - versioning
+    - object lock, WORM
+    - S3 replication time control (s3 rtc), 99.99% replicated w/in 15 minutes, NOT supported by eventbridge (SQS, SNS, or Lambda)
+    - standard, infrequenct access, single AZ 
+    - lifecycle policies can use prefixes? Like move folders to infrequent access?
+    - glacier, glacier instant, glacier deep archive
+      - Glacier minimum storage duration charge is 90 days, so while glacier instant retrieval is fast it's not cost effective for <90d
+    - transfer accelerator for regional speed
+    - multi-part upload for speed on large files (CloudFront behind the scense)
+- Messaging
+  - EventBridge
+    - Can do cron scheduled tasks
+  - SNS
+    - High volume
+    - Pub/sub
+    - Fanout pattern
+    - Retries
+    - not durable, does not retain messages
+  - SQS
+    - one time retrieval, pub/sub
+    - immutable, can't delete
+  - Amazon MQ
+    - Traditional MQ
+- Data Engineering
+  - Kinesis
+    - basically kafka
+    - immutable, can't delete
+    - shards/partitions
+    - Kstreams
+    - retention is 24h default, up to one year
+    - Kanalytics
+      - source from kstream or kFH
+      - reference table from S3 (like lookup tables)
+    - Kfirehose
+      - redshift, s3, opensearch
+      - 3rd party splunk, datadog....
+      - custom http api
+      - supports transforms & can have custom lambda transforms
+      - can multiplex all or failed to s3
+      - buffer flush on time >1m or size <32mb
+    - Kinesis client library (KCL)
+      - Dynamo DB for checkpointing
+      - Each KCL needs its own dynamo
+      - You can only us dynamo (no RDS)
+  - MSK (managed steaming for kafka)
+    - server or serverless
+    - can scale up shards, but not down
+  - Batch
+    - jobs as docker images
+    - fargate serverless or in a vpc
+    - similar to lambda but no time limit or language constraints (any docker) and get EBS disk
+  - EMR (map reduce)
+    - Hadoop (big data)
+  - Glue
+    - ETL
+      - Can reference glue data catalog as ref table
+    - DataCatalog
+      - Can get metadata from other services ands store it
+      - can be a reference table for Glue ETL
+  - Redshift
+    - Data warehouse
+    - Postgres based
+    - "Spectrum" to analyze data in S3, kind of like athena, SQL queries, can mix S3 and redhift cluster
+    - cross account sharing with lake formation tags and resource link
+  - DocumentDB
+    - like MongoDB (like aurora is to mysql)
+    - Has mongo compatibility mode
+  - Timestream
+    - timeseries
+    - -> grafana, sagemaker, quicksight, jdbc, etc.
+  - Athena
+    - for querying S3
+    - Presto behind the scenes
+    - federated queries across multiple sources 
+    - You can also use S3 select against a single object, watch for that on the test
+    - Apache Parquet and Apache ORC are popular columnar data stores
+    - Partition the data in Amazon S3 using Apache Hive partitioning, pick a partition key, time is common
+    - Athena does NOT support the Apache Spark bucketing format
+    - Compression is faster (smaller reads)
+  - Quicksight
+    - Serverless BI dashboarding
+    - QuickSight VPC connection, can be tied to a VPC for private access to data like RDS, makes an ENI in the VPC
+- Organizations
+  - cost and usage reports are in the org (not budget/cost explorer)
+  - consolidated billing is automatic
+  - SCPs do not affect the management account, TIL
+- Security
+  - KMS
+    - AWS managed keys can't be modified
+    - Customer managed keys can be modified, so you can set a key policy to let other services use it, like s3 to sqs
+  - STS
+  - IAM
+    - STS can have an ExternalID for assuming roles from other accounts, kind of like a password. "confused deputy problem"
+  - guardduty
+    - threat detection (in flight, not CVE)
+  - identity center, sso, saml
+    - IAM roles must trust the saml identity provider, like the ARN of the IdP
+  - Permission boundaries
+    - allow you to restrict policies further, like give the new guy a subset of the perms senior members have
+  - Security hub
+    - share security findings
+    - org account delegates an administrator account
+    - admin account can add other org accounts
+    - admin account can *invite* non org accounts to share security findings
+
+- Observability
+  - CloudWatch
+    - Metrics
+      - RAM is not built in
+      - Disk, CPU, net is built in
+      - standard interval is 5 min, 1 min or 1 sec
+      - StatusCheckFailed metric -> alarm _> health check that monitors alarm
+    - Alarms
+      - trigger ec2 state: reboot stop terminate recover, autoscaling, sns
+      - event bridge
+    - Dashboards
+    - Canary, synthetic tests
+    - Logs
+      - Metric filter to alarm or aggregate specific things (like errors or specific IP)
+      - Log Insights, query logs or use queries for dashboards
+      - Exports can take <=12h
+      - Subscriptions is real time and can send to targets
+      - Multi account aggregation send to filter then kinesis DS
+    - EventBridge
+      - Cron/schedule
+      - Reactive to events 
+      - Filterable
+      - Generates a JSON event
+      - Event bus
+        - default, to aws
+        - partner, event bus to send to 3rd parties, zendesk, APM, datadog, etc.
+        - custom, send to your own code
+        - schema registry, event bridge builds it from analyzing events, you can use it as a reference
+        - uses resource policies
+      - X-ray
+        - tracing w/ visual of applications (especially inter micro service)
+      - Personal health
+        - global
+        - service status for AWS (like outage map, maintenance events)
+        - can trigger cloudwatch & eventbridge
+  - Deployment & Instance management
+    - Elastic beanstalk
+      - go, java, tomcat, .net+iis, node, php, python, ruby, packer, docker
+      - single instance (dev), alb+asg (prod), worker (sqs + ec2 in asg)
+      - keep the RDS DB outside beanstalk as best practice because the DB (and data) is lost when you delete the environment, DB can be decoupled w/ deletion policies delete/snapshot/retain
+      - Do blue green w/ CNAME
+    - CodeDeploy
+      - agent can push code
+      - ec2, ecs, asg, lambda
+      - different deployment strategies
+    - OpsWorks
+      -  configuration management service that provides managed instances of Chef and Puppet
+      -  blue/green, not canary
+    - CloudFormation
+      - stacksets vs stacks
+      - delete modes; retain, delete, snapshot
+    - System catalog
+    - SAM
+    - SSM
+      - agent runs commands
+      - lifecycle hooks in ASG scale downs
+      - patch manager baselines
+      - session manager (ssh/rdp)
+      - OpsCenter, incidents
+    - CloudMap
+      - resource discovery
+      - like consul discovery
+  - Cost Control
+    - Allocation tags
+      - like tags, but show as columns in cost reports
+    - Tag editor
+    - Trusted Advisor
+      - quotas and service limits reports
+      - performance, security, and cost optimization
+  - Migration
+    - 6R
+      - rehost: lift & shift
+      - replatform: same arch, new AWS stuff
+      - repurchase (new product)
+      - refactor/rearch - redo as cloud
+      - retire
+      - retain/remain
+    - Analysis Phase
+      - AWS Application Discovery Service
+      - AWS Cloud Adoption Readiness Tool (CART)
+        - This is a "toolkit"
+        - just questionnaire
+        - not just tech
+      - AWS Migration Hub
+        - actual migration, not planning
+    - storage gateway
+      - s3 file gw
+        - NFS or SMB
+        - caching
+        - supports all storage but glacier
+        - SMB/CIFS has AD integration
+        - use gw to use s3 as normal storage
+        - can do read replicas
+      - fsx file gw
+        - SMB/CIFS
+        - Gateway is for caching since fsx is already natively available over internet
+        - Windows native (ntfs, ad, etc.)
+      - volume gw
+        - iSCSI against s3 and ebs
+        - Cached or stored (local store w/ schedule backups)
+      - tape gw
+        - virtual tape library backed by s3
+        - iSCSI
+      - Hardware appliance is available if no local vms
+    - Snow family
+      - snail mail data transfer
+      - can't cluster
+      - no usb (only network/fiber)
+      - to go faster run jobs in parallel (multiple terminals)
+      - directories are faster than individual files
+      - snowball
+        - max 80tb
+      - SB edge
+        - block or s3
+        - storage or compute optimized
+      - Snowcone
+        - Small size, rugged
+        - For edge locations
+        - snail mail or datasync
+        - 1Gbps = 10TB/day transfer, use this for choosing method to replicate to AWS
+      - Snowmobile
+        - truck for exabytes of data
+        - basically a mini data center w/ cooling etc.
+      - has a client or use OpsHub
+      - AWS definition of edge is "no internet", so not just ROBO stores/branches
+      - Can run ec2 & lambda w/ IoT greengrass
+      - OpsHub
+        - client software, laptop
+        - kind of a mini aws console for snow & greengrass stuff
+      - s3 adapter for snowball increases xfer speed from 25mbps to 250mbps
+    - Database migration service DMS
+      - same engine or diff engines (example: mssql->mssql or mssql->oracle)
+      - scp, schema conversion tool
+    - CART, Cloud adoption readiness tool
+    - Disaster recovery
+      - backup/restore
+      - pilot light
+      - warm standby
+      - hot standby
+    - Fault injection simulator (FIS)
+      - chaos engineering
+    - VM migration services
+      - Application Discovery Service
+        - The vmware agent just gives you metrics, the OS agents gives more details like running processes
+        - AWS Application Discovery Service performs server utilization data and dependency mapping and collects and presents configuration, usage, and behavior data from your servers to help you better understand your workloads.
+      - agentless w/ OVA
+      - agent w/ install (more detailed)
+      - exported to s3
+      - query w/ athena
+      - App migration service (MGN)
+        - continuous replication to staging env then cut to scaled production
+        - also has ADS data
+      - Elastic Disaster Recovery (DRS)
+        - replicates data to scaled down instances that can be used to restore service
+      - installs in vcenter or on physical machines (not in VMs), it can go in VMs, but agentless is more efficient
+    - AWS migration evaluator
+      - build a business case
+      - uses data to estimate costs
+    - AWS backup
+      - backup aws services
+      - supports about everything
+      - cross region and cross account
+  - CloudTrail
+    - All AWS api calls
+  - Machine Learning
+    - Rekognition
+      - Image processing/recognition
+      - Video
+        - from kinesis vid streams
+        - to kinesis data streams
+        - can store videos and stream them too
+    - Transcribe
+      - speech to text
+    - Polly
+      - text to speech
+      - lexicons for customize lookup (like AWS==Amazon Web Services)
+      - SSML to markup and taylor speech (emphasis, whisper, etc.)
+    - Translate
+      - convert between languages
+    - Lex
+      - speech to text
+      - understands intent and intent
+      - chatbots
+    - Connect
+      - callcenter stuff
+      - cheaper than others
+    - Comprehend
+      - Natural language processing
+      - Sentiment analysis
+      - tokenization, key phrases
+    - Comprehend medical
+      - Converts notes into analasys and scrubs it
+      - turns unstructured text into structured data
+    - SageMaker
+      - Build your own ML model
+    - Forecast
+      - future performance based on past data
+    - Kendra
+      - Document search service
+      - Get answers from text
+    - Personalize
+      - ML service to provide recommendations/personalization
+    - Textract
+      - extract text from scanned documents
+  - Other
+    - Workspaces
+    - AppStream
+    - Device farm for testing web/mobile
+    - Macie, data privacy detection, only in s3
+    - SES is bulk emails (compared to SNS single emails), like for campaigns
+      - SES is not immediate, could be delayed, not good for notifications
+    - Pinpoint, two way marketing (like twilio)
+    - ec2 image builder (like packer), codepipeline based, send to multiple regions
+    - IoT core
+      - kinesis data streams -> lambda -> iot channels -> iot analytics
+      - manage from mobile device w/ 1-click. IoT events for monitoring. FleetWise for vehicles. SiteWise for industrial devices. MQTT machine to machine IoT protocol Message Queing Telemetry Transport
+    - Use AWS Elemental MediaConvert for file-based video processing and Amazon CloudFront for delivery. Use video streaming protocols like Apple’s HTTP Live Streaming (HLS) and create a manifest file. Point the     CloudFront distribution at the manifest. video streaming protocols including Apple’s HTTP Live Streaming (HLS), Dynamic Adaptive Streaming over HTTP (DASH), Microsoft’s Smooth Streaming (MSS), and Adobe’s HTTP Dynamic Streaming (HDS)
+    - Global conext key. Restrict access in accounts to only resources/accounts from the org. The aws:PrincipalOrgID global condition key can be used with the Principal element in a resource-based policy with AWS KMS. You need to specify the Organization ID in the Condition element
+    - Policies are a single json and statement is an array { version: "2012..", statement: [ {policy}, {policy} ] }
+    - Data Exchange
+      - Multiplex data out to other people. Like sharing models.
+    - Fraud predictor
+      - dataset -> configure label classifications
+    - Amazon Forecast
+      - s3 -> predictor -> train -> export
+    - Audit Manager
+      - evidence to s3 -> retreive to audit manager -> export to s3
+    - Detective
+      - Amazon Detective helps to analyze, investigate, and quickly identify the root cause of potential security issues or suspicious activities. It can analyze data from sources such as Amazon VPC flow logs, AWS CloudTrail logs, Amazon EKS audit logs, and Amazon GuardDuty findings. Can be graphical.
+      - multiple accounts, single region
+    - AWS Firewall
+      - between subnets in a VPC
+      - can be central to org w/ aws config
+      - Create policies for smaller security groups that can be applied based on tags
+    - Service Catalog
+      - portfolios with template constraints
+      - System manager documents to define service actions
+      - Conformance packs are a bundle of Config rules and remediations
+      - Config rules per region that aggregate to single account
+      - can add json rules, like template constraints to limit parts of the catalog for certain conditions like a lower environment
+    - AWS proton
+      - environment and service templates
+      - IAm service roles go in templates
+      - Container delivery service for platoform engineering
+    - Local zone
+      - a mini region, it's like a region but smaller data center closer to users, generally big cities or industry zones
+    - Outpost
+      - Run aws services in local datacenter
+    - Wavelength
+      - hosted by 5g carrier
+      - carrier gateway instead of nat gateway
+      - communication between wavelength zone has to be between VPCs via transit gateway
